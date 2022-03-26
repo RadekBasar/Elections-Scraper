@@ -1,0 +1,152 @@
+import sys
+import requests
+import bs4
+import csv
+
+URL_BASE = "https://volby.cz/pls/ps2017nss/"
+
+
+def scrape_villages(url):
+    parsed_page = get_parsed_page(url)
+    villages_info = get_villages_info(parsed_page)
+    scrapped_villages = []
+    for village_info in villages_info:
+        village_url = village_info[2]
+        village_parsed_page = get_parsed_page(village_url)
+        if village_parsed_page.find("div", class_="in_940"):
+            district_urls = get_district_urls(village_parsed_page)
+            for district_url in district_urls:
+                village_parsed_page = get_parsed_page(district_url)
+                village_details = get_village_details(village_parsed_page)
+                village_to_write = village_item_to_write(village_info, village_details)
+                scrapped_villages.append(village_to_write)
+        else:
+            village_details = get_village_details(village_parsed_page)
+            village_to_write = village_item_to_write(village_info, village_details)
+            scrapped_villages.append(village_to_write)
+    return scrapped_villages
+
+
+def get_parsed_page(url):
+    response = get_page_from_url(url)
+    return parse_page(response.text)
+
+
+def get_page_from_url(url):
+    try:
+        response = requests.get(url)
+    except:
+        quit("Invalid URL")
+    else:
+        if response.status_code != 200:
+            quit("Response status code not OK")
+        return response
+
+
+def parse_page(page):
+    try:
+        soup = bs4.BeautifulSoup(page, "html.parser")
+        return soup
+    except:
+        quit("Cannot parse page")
+
+
+def print_village(village_info, village_detail):
+    print(village_info[0] + ";" + village_info[1] + ";" + village_detail[0] + ";" + village_detail[1] + ";" +
+          village_detail[2] + ";" + ','.join(village_detail[3]))
+
+
+# Vraci seznam obci - (kod, nazev, URL)
+def get_villages_info(parsed_page):
+    try:
+        villages = []
+        villages_tables = parsed_page.find("div", id="inner").find_all("table")
+        for village_table in villages_tables:
+            rows = village_table.find_all("tr")
+            for row in rows:
+                village_code_tag = row.find("td", class_="cislo")
+                village_name_tag = row.find("td", class_="overflow_name")
+                village_link_tag = row.find("td", class_="center")
+                if village_code_tag:
+                    villages.append(
+                        (village_code_tag.a.text, village_name_tag.text, URL_BASE + village_link_tag.a['href']))
+        return villages
+    except:
+        quit("Get village info error")
+
+
+# Vraci seznam okrsku v obci - URL
+def get_district_urls(parsed_page):
+    try:
+        districts = []
+        districts_tables = parsed_page.find("div", id="publikace").find_all("table")
+        for district_table in districts_tables:
+            rows = district_table.find_all("tr")
+            for row in rows:
+                district_tags = row.find_all("td", class_="cislo")
+                if district_tags:
+                    for district_tag in district_tags:
+                        districts.append(URL_BASE + district_tag.a['href'])
+        return districts
+    except:
+        quit("Get district urls error")
+
+
+# Vraci detail obce - (pocet volicu, pocet vydanych obalek, pocet platnych hlasu, seznam kandidujicich stran)
+def get_village_details(parsed_page):
+    try:
+        table = parsed_page.find("table")
+        voters_count = table.find("td", class_="cislo", headers="sa2").text
+        envelops_count = table.find("td", class_="cislo", headers="sa3").text
+        valid_votes_count = table.find("td", class_="cislo", headers="sa6").text
+        parties = get_parties(parsed_page)
+        return voters_count, envelops_count, valid_votes_count, parties
+    except:
+        quit("Get villages detail error")
+
+
+def get_parties(parsed_page):
+    try:
+        parties = []
+        parties_tables = parsed_page.find("div", id="inner").find_all("table")
+        for parties_table in parties_tables:
+            rows = parties_table.find_all("tr")
+            for row in rows:
+                party_tag = row.find("td", class_="overflow_name")
+                if party_tag:
+                    parties.append(party_tag.text)
+        return parties
+    except:
+        quit("Get parties error")
+
+
+def village_item_to_write(village_info, village_details):
+    return [village_info[0], village_info[1], village_details[0], village_details[1], village_details[2],
+            ','.join(village_details[3])]
+
+
+def write_to_file(items, csv_file_name):
+    try:
+        file = open(csv_file_name + ".csv", 'w')
+        try:
+            file_writer = csv.writer(file, delimiter=";")
+            file_writer.writerows(items)
+        except:
+            print("Writing to file error")
+        finally:
+            file.close()
+    except:
+        print("Open file error")
+
+
+if __name__ == "__main__":
+    try:
+        url = str(sys.argv[1])
+        csv_file_name = str(sys.argv[2])
+    except:
+        quit("Arguments error")
+    else:
+        if not url or not csv_file_name:
+            quit("Empty URL or file name")
+        villages_to_write = scrape_villages(url)
+        write_to_file(villages_to_write, csv_file_name)
