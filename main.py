@@ -15,11 +15,16 @@ def scrape_villages(url):
         village_parsed_page = get_parsed_page(village_url)
         if village_parsed_page.find("div", class_="in_940"):
             district_urls = get_district_urls(village_parsed_page)
+            merged_village_to_write = []
             for district_url in district_urls:
                 village_parsed_page = get_parsed_page(district_url)
                 village_details = get_village_details(village_parsed_page)
                 village_to_write = village_item_to_write(village_info, village_details)
-                scrapped_villages.append(village_to_write)
+                if not merged_village_to_write:
+                    merged_village_to_write = village_to_write
+                else:
+                    merged_village_to_write = merge_village_items(merged_village_to_write, village_to_write)
+            scrapped_villages.append(merged_village_to_write)
         else:
             village_details = get_village_details(village_parsed_page)
             village_to_write = village_item_to_write(village_info, village_details)
@@ -51,11 +56,6 @@ def parse_page(page):
         quit("Cannot parse page")
 
 
-def print_village(village_info, village_detail):
-    print(village_info[0] + ";" + village_info[1] + ";" + village_detail[0] + ";" + village_detail[1] + ";" +
-          village_detail[2] + ";" + ','.join(village_detail[3]))
-
-
 # Vraci seznam obci - (kod, nazev, URL)
 def get_villages_info(parsed_page):
     try:
@@ -81,12 +81,10 @@ def get_district_urls(parsed_page):
         districts = []
         districts_tables = parsed_page.find("div", id="publikace").find_all("table")
         for district_table in districts_tables:
-            rows = district_table.find_all("tr")
-            for row in rows:
-                district_tags = row.find_all("td", class_="cislo")
-                if district_tags:
-                    for district_tag in district_tags:
-                        districts.append(URL_BASE + district_tag.a['href'])
+            district_tags = district_table.find_all("td", class_="cislo")
+            if district_tags:
+                for district_tag in district_tags:
+                    districts.append(URL_BASE + district_tag.a['href'])
         return districts
     except:
         quit("Get district urls error")
@@ -109,27 +107,40 @@ def get_parties(parsed_page):
     try:
         parties = []
         parties_tables = parsed_page.find("div", id="inner").find_all("table")
-        for parties_table in parties_tables:
+        for table_index in range(len(parties_tables)):
+            parties_table = parties_tables[table_index]
             rows = parties_table.find_all("tr")
             for row in rows:
-                party_tag = row.find("td", class_="overflow_name")
-                if party_tag:
-                    parties.append(party_tag.text)
+                table_number = table_index + 1
+                headers = "t" + str(table_number) + "sa2 t" + str(table_number) + "sb3"
+                party_valid_votes_tag = row.find("td", class_="cislo", headers=headers)
+                if party_valid_votes_tag:
+                    parties.append(party_valid_votes_tag.text)
         return parties
     except:
         quit("Get parties error")
 
 
 def village_item_to_write(village_info, village_details):
-    return [village_info[0], village_info[1], village_details[0], village_details[1], village_details[2],
-            ','.join(village_details[3])]
+    items = [village_info[0], village_info[1], village_details[0], village_details[1], village_details[2]]
+    for item in village_details[3]:
+        items.append(item)
+    return items
+
+
+def merge_village_items(old_village_items, new_village_items):
+    village_items = old_village_items
+    for index in range(2, len(new_village_items)):
+        village_items[index] = str(
+            int("".join(old_village_items[index].split())) + int("".join(new_village_items[index].split())))
+    return village_items
 
 
 def write_to_file(items, csv_file_name):
     try:
         file = open(csv_file_name + ".csv", 'w')
         try:
-            file_writer = csv.writer(file, delimiter=";")
+            file_writer = csv.writer(file, delimiter=",")
             file_writer.writerows(items)
         except:
             print("Writing to file error")
@@ -148,5 +159,6 @@ if __name__ == "__main__":
     else:
         if not url or not csv_file_name:
             quit("Empty URL or file name")
-        villages_to_write = scrape_villages(url)
-        write_to_file(villages_to_write, csv_file_name)
+        else:
+            villages_to_write = scrape_villages(url)
+            write_to_file(villages_to_write, csv_file_name)
